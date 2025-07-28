@@ -278,7 +278,7 @@ server <- function(input, output, session) {
   updateSelectInput(session, "mech", choices = unique(sim_params$mech))
   updateCheckboxGroupInput(session, "dgm",
     choices  = setNames(unique(sim_params$dgm), pretty_dgm(unique(sim_params$dgm))),
-    selected = unique(sim_params$dgm)
+    selected = "nb_bin"
   )
 
   output$phi_ui <- renderUI({
