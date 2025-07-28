@@ -218,84 +218,116 @@ prettify_headers <- function(df) {
 }
 
 ui <- fluidPage(
-  ## Roboto fetched at run‑time (zero effect on the build step)
+  ## Roboto at run‑time (no build‑time effect) -------------------------------
   tags$head(
     tags$link(
       rel  = "stylesheet",
       href = "https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap"
     ),
-    tags$style(HTML(":root{--bs-body-font-family:'Roboto',system-ui,sans-serif;}"))
+    tags$style(HTML(":root{--bs-body-font-family:'Roboto',system-ui,sans-serif;}")),
+    
+    ## jsPDF from CDN for PDF creation
+    tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"),
+    
+    ## Custom message handlers for CSV & PDF downloads
+    tags$script(HTML("
+      Shiny.addCustomMessageHandler('download-csv', function(msg) {
+        var blob = new Blob([msg.data], { type: 'text/csv;charset=utf-8;' });
+        var a = document.createElement('a');
+        var url = URL.createObjectURL(blob);
+        a.href = url; a.download = msg.filename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+      });
+      Shiny.addCustomMessageHandler('download-pdf', function(msg) {
+        const { jsPDF } = window.jspdf;
+        // Grab the <img> that Shiny's renderPlot() generated:
+        var container = document.getElementById('zip_plot');
+        if (!container) { alert('Plot container not found'); return; }
+        var img = container.getElementsByTagName('img')[0];
+        if (!img) { alert('Plot image not found'); return; }
+        var doc = new jsPDF();
+        // full‑width image, preserve aspect ratio
+        doc.addImage(img.src, 'PNG', 10, 10, 190, 0);
+        doc.save(msg.filename);
+      });
+    "))
   ),
+  
   theme = app_theme,
+  
   tags$style(HTML("
-    div.dataTables_filter{float:left!important;text-align:left!important;}
-    table.dataTable tbody td{padding:6px 10px;}
+    div.dataTables_filter{ float:left!important; text-align:left!important; }
+    table.dataTable tbody td{ padding:6px 10px; }
   ")),
+  
   titlePanel("Interactive Simulation Summaries"),
+  
   sidebarLayout(
     sidebarPanel(
       width = 3,
+      
       h4("Simulation Parameters"),
       selectInput("ate_exp", "Effect Size (ATE):", choices = NULL),
       selectInput("mech", "Missingness Mechanism:", choices = NULL),
       uiOutput("phi_ui"),
-      selectInput("weight_type", "Winsorise at 99th perc:",
-        choices = c("No" = "raw", "Yes" = "win"), selected = "raw"
-      ),
-      checkboxGroupInput("dgm", "Exposure Distribution:", choices = NULL),
-      hr(), h4("View Selection"),
+      selectInput("weight_type", "Winsorise at 99th perc:", 
+                  choices = c("No" = "raw", "Yes" = "win"), selected = "raw"),
+      checkboxGroupInput("dgm",  "Exposure Distribution:",       choices = NULL),
+      
+      hr(),
+      h4("View Selection"),
       selectInput("view_type", "Result Type to View:",
-        choices = c(
-          "Model Performance" = "models",
-          "Covariate Balance" = "balance"
-        )
-      ),
-      hr(), uiOutput("method_ui"),
+                  choices = c("Model Performance" = "models",
+                              "Covariate Balance"   = "balance")),
+      
+      hr(),
+      uiOutput("method_ui"),
+      
       hr(),
       h4("Downloads"),
-      downloadButton("dl_docx", "Download table (.docx)", style = "width:100%; margin-bottom:5px;"),
-      downloadButton("dl_png",  "Download plot (.png)", style = "width:100%;")
+      actionButton("btn_dl_csv", "Download table (.csv)",
+                   style = "width:100%; margin-bottom:5px;"),
+      actionButton("btn_dl_pdf", "Download plot (.pdf)",
+                   style = "width:100%;")
     ),
+    
     mainPanel(
       width = 9,
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Summary Table", DTOutput("summary_tbl")),
         tabPanel("Zip Plot",      plotOutput("zip_plot", height = "800px"))
-        )
       )
     )
+  )
 )
 
 
-# Server ----------------------------------------------------------------------------------------------------------
-
 server <- function(input, output, session) {
-  ## Populate selectors ---------------------------------------------------------
+  ## Populate selectors -------------------------------------------------------
   updateSelectInput(session, "ate_exp",
-    choices = setNames(
-      sort(unique(sim_params$ate_exp)),
-      paste0("ln ", sort(unique(sim_params$ate_exp)))
-    ),
-    selected = 1.1
+                    choices  = setNames(sort(unique(sim_params$ate_exp)),
+                                        paste0("ln ", sort(unique(sim_params$ate_exp)))),
+                    selected = 1.1
   )
   updateSelectInput(session, "mech", choices = unique(sim_params$mech))
-  updateCheckboxGroupInput(session, "dgm",
+  updateCheckboxGroupInput(
+    session, "dgm",
     choices  = setNames(unique(sim_params$dgm), pretty_dgm(unique(sim_params$dgm))),
     selected = "nb_bin"
   )
-
+  
   output$phi_ui <- renderUI({
     req(input$mech)
     if (input$mech == "complete") {
       selectInput("phi", "Proportion of Missingness:", choices = 0, selected = 0)
     } else {
       selectInput("phi", "Proportion of Missingness:",
-        choices = sort(unique(sim_params$phi[sim_params$mech == input$mech]))
-      )
+                  choices = sort(unique(sim_params$phi[sim_params$mech == input$mech])))
     }
   })
-
+  
   output$method_ui <- renderUI({
     req(input$view_type)
     available <- if (input$view_type == "models") {
@@ -305,83 +337,82 @@ server <- function(input, output, session) {
     }
     checkboxGroupInput("method", "Method:", choices = available, selected = available)
   })
-
-  ## Reactive filters -----------------------------------------------------------
+  
+  ## Reactive filters ---------------------------------------------------------
   base_filter <- function(ds) {
     ds %>% filter(
       ate_exp == input$ate_exp,
       mech == input$mech,
-      phi == input$phi,
-      weight == input$weight_type,
+      phi == req(input$phi),
+      weight  == input$weight_type,
       dgm %in% input$dgm,
       method %in% input$method
     )
   }
   filt_energy <- reactive(collect_df(base_filter(ds_energy)) %>% mutate(dgm = pretty_dgm(dgm)))
-  filt_cors <- reactive(collect_df(base_filter(ds_cors)) %>% mutate(dgm = pretty_dgm(dgm)))
+  filt_cors   <- reactive(collect_df(base_filter(ds_cors))   %>% mutate(dgm = pretty_dgm(dgm)))
   filt_models <- reactive(collect_df(base_filter(ds_models)) %>% mutate(dgm = pretty_dgm(dgm)))
-
-  ## Summary table --------------------------------------------------------------
+  
+  ## Summary table ------------------------------------------------------------
   current_table_raw <- reactive({
     if (input$view_type == "models") {
       df <- filt_models()
-      if (!nrow(df)) {
-        return(NULL)
-      }
-      sims <- rsimsum::simsum(df, "estimate", "std.error",
+      if (!nrow(df)) return(NULL)
+      sims <- rsimsum::simsum(
+        df, "estimate", "std.error",
         true = log(as.numeric(input$ate_exp)),
         methodvar = "method", by = "dgm"
       )
       format_rsimsum_summary(sims)
     } else {
-      de <- filt_energy()
-      dc <- filt_cors()
-      if (!nrow(de) || !nrow(dc)) {
-        return(NULL)
-      }
+      de <- filt_energy(); dc <- filt_cors()
+      if (!nrow(de) || !nrow(dc)) return(NULL)
       balance_summary_tbl(de, dc)
     }
   })
-
+  
   current_table_disp <- reactive({
     tbl <- current_table_raw()
-    if (is.null(tbl)) {
-      return(NULL)
-    }
+    if (is.null(tbl)) return(NULL)
     tbl <- round_numeric_cols(tbl)
     if (input$view_type == "balance") tbl <- prettify_headers(tbl)
     tbl
   })
-
+  
   output$summary_tbl <- renderDT({
-    if (is.null(current_table_disp())) {
-      return(datatable(data.frame(Message = "No data for this combination."),
-        class = "compact", rownames = FALSE
-      ))
+    tbl <- current_table_disp()
+    if (is.null(tbl)) {
+      datatable(
+        data.frame(Message = "No data for this combination."),
+        class = "compact",
+        rownames = FALSE
+      )
+    } else {
+      datatable(
+        tbl,
+        class = "stripe hover compact order-column row-border",
+        rownames  = FALSE,
+        filter = "top",
+        options = list(pageLength = 20, autoWidth = TRUE, scrollX = TRUE),
+        selection = "none",
+        escape = FALSE
+      )
     }
-    datatable(
-      current_table_disp(),
-      class = "stripe hover compact order-column row-border",
-      rownames = FALSE, filter = "top",
-      options = list(pageLength = 20, autoWidth = TRUE, scrollX = TRUE),
-      selection = "none", escape = FALSE
-    )
   })
-
-  ## Zip plot -------------------------------------------------------------------
+  
+  ## Zip plot -----------------------------------------------------------------
   current_plot <- reactive({
     req(input$view_type == "models")
     df <- filt_models()
-    if (!nrow(df)) {
-      return(NULL)
-    }
+    if (!nrow(df)) return(NULL)
     plot_zip_with_estimates(df, true_value = log(as.numeric(input$ate_exp)))
   })
+  
   output$zip_plot <- renderPlot({
-    g <- current_plot()
-    req(!is.null(g))
+    g <- current_plot(); req(!is.null(g))
     print(g)
   })
+  
   observe({
     if (input$view_type != "models") {
       hideTab("main_tabs", "Zip Plot")
@@ -389,36 +420,37 @@ server <- function(input, output, session) {
       showTab("main_tabs", "Zip Plot")
     }
   })
-  # Downloads
-  output$dl_docx <- downloadHandler(
-    filename = function() paste0("summary-", Sys.Date(), ".docx"),
-    content  = function(file) {
-      # ensure officer is available (downloads once, then cached)
-      install_missing_pkgs("officer")
-      install_missing_pkgs("flextable")
-      
-      tbl <- current_table_disp()
-      validate(need(!is.null(tbl), "No data to download"))
-      doc <- officer::read_docx() |>
-        flextable::body_add_flextable(flextable::flextable(tbl))
-      print(doc, target = file)               # write the .docx
-    },
-    contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  )
-  output$dl_png <- downloadHandler(
-    filename = function() paste0("zip-plot-", Sys.Date(), ".png"),
-    content  = function(file) {
-      install_missing_pkgs("ragg")            # lightweight, high‑quality PNG device
-      g <- current_plot()
-      validate(need(!is.null(g), "No plot to download"))
-      ragg::agg_png(file, width = 2400, height = 1600, res = 300)
-      print(g)
-      dev.off()
-    },
-    contentType = "image/png"
-  )
+  
+  ## CLIENT‑SIDE DOWNLOADS ----------------------------------------------------
+  # 1) Table as CSV
+  observeEvent(input$btn_dl_csv, {
+    tbl <- current_table_disp()
+    validate(need(!is.null(tbl), "No data to download"))
+    csv_lines <- c(
+      paste(colnames(tbl), collapse = ","),
+      apply(tbl, 1, function(r) paste(r, collapse = ","))
+    )
+    csv_text <- paste(csv_lines, collapse = "\r\n")
+    session$sendCustomMessage(
+      "download-csv",
+      list(
+        data     = csv_text,
+        filename = paste0("summary-", Sys.Date(), ".csv")
+      )
+    )
+  })
+  
+  # 2) Plot as PDF
+  observeEvent(input$btn_dl_pdf, {
+    # JS side will look up the <img> with id="zip_plot"
+    session$sendCustomMessage(
+      "download-pdf",
+      list(
+        filename = paste0("zip-plot-", Sys.Date(), ".pdf")
+      )
+    )
+  })
 }
-
 
 # Run app ---------------------------------------------------------------------------------------------------------
 
