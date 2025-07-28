@@ -250,17 +250,21 @@ ui <- fluidPage(
           "Covariate Balance" = "balance"
         )
       ),
-      hr(), uiOutput("method_ui")
+      hr(), uiOutput("method_ui"),
+      hr(),
+      h4("Downloads"),
+      downloadButton("dl_docx", "Download table (.docx)", style = "width:100%; margin-bottom:5px;"),
+      downloadButton("dl_png",  "Download plot (.png)", style = "width:100%;")
     ),
     mainPanel(
       width = 9,
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Summary Table", DTOutput("summary_tbl")),
-        tabPanel("Zip Plot", plotOutput("zip_plot", height = "800px"))
+        tabPanel("Zip Plot",      plotOutput("zip_plot", height = "800px"))
+        )
       )
     )
-  )
 )
 
 
@@ -385,6 +389,34 @@ server <- function(input, output, session) {
       showTab("main_tabs", "Zip Plot")
     }
   })
+  # Downloads
+  output$dl_docx <- downloadHandler(
+    filename = function() paste0("summary-", Sys.Date(), ".docx"),
+    content  = function(file) {
+      # ensure officer is available (downloads once, then cached)
+      install_missing_pkgs("officer")
+      install_missing_pkgs("flextable")
+      
+      tbl <- current_table_disp()
+      validate(need(!is.null(tbl), "No data to download"))
+      doc <- officer::read_docx() |>
+        flextable::body_add_flextable(flextable::flextable(tbl))
+      print(doc, target = file)               # write the .docx
+    },
+    contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  )
+  output$dl_png <- downloadHandler(
+    filename = function() paste0("zip-plot-", Sys.Date(), ".png"),
+    content  = function(file) {
+      install_missing_pkgs("ragg")            # lightweight, high‑quality PNG device
+      g <- current_plot()
+      validate(need(!is.null(g), "No plot to download"))
+      ragg::agg_png(file, width = 2400, height = 1600, res = 300)
+      print(g)
+      dev.off()
+    },
+    contentType = "image/png"
+  )
 }
 
 
