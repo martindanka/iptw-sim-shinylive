@@ -379,23 +379,60 @@ server <- function(input, output, session) {
     tbl
   })
   
-  output$summary_tbl <- renderDT({
+output$summary_tbl <- renderDT({
     tbl <- current_table_disp()
     if (is.null(tbl)) {
       datatable(
         data.frame(Message = "No data for this combination."),
-        class = "compact",
+        class    = "compact",
         rownames = FALSE
       )
     } else {
+
+      ## ---------- FOOTNOTE TEXT & CAPTION (new) --------------------------- ##
+      footnote <- if (input$view_type == "models") {
+        paste(
+          "Point estimates and confidence intervals were derived from weighted",
+          "Poisson regression models with a sandwich estimator for variance.",
+          "Unweighted outcome regressions (adjusted and unadjusted) are shown",
+          "for comparison. All IPTW methods used stabilised weights.<br />(np)CBPS –",
+          "(Non-Parametric) Covariate Balancing Propensity Scores; DGM –",
+          "Data-Generating Mechanism; Emp. SE – Empirical Standard Error; GBM –",
+          "Generalised Boosted Models; MCSE – Monte Carlo Standard Error;",
+          "Model SE – Model-Based Standard Error; Rel. Bias – Relative Bias.",
+          collapse = " "
+        )
+      } else {
+        paste(
+          "The ε<sub>C</sub> metric and the absolute treatment–covariate",
+          "correlations were averaged across the three confounders.<br />(np)CBPS –",
+          "(Non-Parametric) Covariate Balancing Propensity Scores; DGM –",
+          "Data-Generating Mechanism; Dw – distance metric (optimised by the",
+          "energy-balancing approach); ε<sub>A</sub> – energy distance between the",
+          "weighted and unweighted marginal distributions of the exposure;",
+          "ε<sub>C</sub> – energy distance between the weighted and unweighted",
+          "marginal distributions of the covariates; ESS – Effective Sample Size;",
+          "GBM – Generalised Boosted Models; MCSE – Monte Carlo Standard Error;",
+          "NegBin – Negative Binomial; ρ<sub>w</sub> – average weighted",
+          "treatment-covariate correlation; perc – percentile; SD – standard",
+          "deviation.",
+          collapse = " "
+        )
+      }                                             ### ADDED ###
+      ## -------------------------------------------------------------------- ##
+
       datatable(
         tbl,
-        class = "stripe hover compact order-column row-border",
+        class     = "stripe hover compact order-column row-border",
         rownames  = FALSE,
-        filter = "top",
-        options = list(pageLength = 20, autoWidth = TRUE, scrollX = TRUE),
+        filter    = "top",
+        options   = list(pageLength = 20, autoWidth = TRUE, scrollX = TRUE),
         selection = "none",
-        escape = FALSE
+        escape    = FALSE,
+        caption   = tags$caption(                   ### ADDED ###
+          style = "caption-side: bottom; text-align: left; font-size: 0.85em;",
+          HTML(footnote)
+        )
       )
     }
   })
