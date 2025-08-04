@@ -18,7 +18,8 @@ if (!nzchar(Sys.getenv("SHINYLIVE"))) {
     if (length(need)) webr::install(need)
   }
 }
-install_missing_pkgs(c("rsimsum", "ggplot2"))
+# Added ggdist & forcats for the Bias Plot
+install_missing_pkgs(c("rsimsum", "ggplot2", "ggdist", "forcats"))
 
 # 3. Base directory for app files
 app_base <- if (nzchar(Sys.getenv("SHINYLIVE"))) {
@@ -42,6 +43,7 @@ library(scales)
 library(readr)
 library(rsimsum)
 library(munsell)
+library(ggdist)
 
 # Import data -----------------------------------------------------------------------------------------------------
 
@@ -257,6 +259,8 @@ prettify_headers <- function(df) {
 
 plot_dir <- file.path(app_base, "plot_R")
 source(file.path(plot_dir, "coverage_plot.R"))
+source(file.path(plot_dir, "bias_plot.R"))  # NEW
+
 
 ui <- fluidPage(
   ## Roboto at run-time (no build-time effect) -------------------------------
@@ -282,7 +286,7 @@ ui <- fluidPage(
       });
       Shiny.addCustomMessageHandler('download-pdf', function(msg) {
         const { jsPDF } = window.jspdf;
-        // Grab the <img> for the currently visible plot (Zip or Coverage):
+        // Grab the <img> for the currently visible plot (Bias/Coverage/Zip):
         function findVisiblePlotImage(ids) {
           for (const id of ids) {
             var container = document.getElementById(id);
@@ -297,9 +301,10 @@ ui <- fluidPage(
           }
           return null;
         }
-        var img = findVisiblePlotImage(['zip_plot','coverage_plot']) ||
-                  (document.getElementById('zip_plot')||{}).getElementsByTagName?.('img')[0] ||
-                  (document.getElementById('coverage_plot')||{}).getElementsByTagName?.('img')[0];
+        var img = findVisiblePlotImage(['bias_plot','coverage_plot','zip_plot']) ||
+                  (document.getElementById('bias_plot')||{}).getElementsByTagName?.('img')[0] ||
+                  (document.getElementById('coverage_plot')||{}).getElementsByTagName?.('img')[0] ||
+                  (document.getElementById('zip_plot')||{}).getElementsByTagName?.('img')[0];
 
         if (!img) { alert('Plot image not found'); return; }
         var doc = new jsPDF();
@@ -361,8 +366,9 @@ ui <- fluidPage(
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Summary Table", DTOutput("summary_tbl")),
-        tabPanel("Zip Plot",      plotOutput("zip_plot", height = "800px")),
-        tabPanel("Coverage Plot", plotOutput("coverage_plot", height = "800px"))  ### NEW
+        tabPanel("Bias Plot",     plotOutput("bias_plot", height = "800px")),     # NEW (order)
+        tabPanel("Coverage Plot", plotOutput("coverage_plot", height = "800px")),
+        tabPanel("Zip Plot",      plotOutput("zip_plot", height = "800px"))
       )
     )
   )
@@ -534,13 +540,28 @@ server <- function(input, output, session) {
     print(g)
   })
   
+  ## Bias plot ----------------------------------------------------------------
+  current_bias_plot <- reactive({
+    req(input$view_type == "models")
+    df <- collect_df(base_filter(ds_models))
+    if (!nrow(df)) return(NULL)
+    plot_bias_by_method(df, true_value = log(as.numeric(input$ate_exp)))
+  })
+  
+  output$bias_plot <- renderPlot({
+    g <- current_bias_plot(); req(!is.null(g))
+    print(g)
+  })
+  
   observe({
     if (input$view_type != "models") {
+      hideTab("main_tabs", "Bias Plot")
+      hideTab("main_tabs", "Coverage Plot")
       hideTab("main_tabs", "Zip Plot")
-      hideTab("main_tabs", "Coverage Plot")    ### NEW
     } else {
+      showTab("main_tabs", "Bias Plot")
+      showTab("main_tabs", "Coverage Plot")
       showTab("main_tabs", "Zip Plot")
-      showTab("main_tabs", "Coverage Plot")    ### NEW
     }
   })
   
@@ -565,7 +586,7 @@ server <- function(input, output, session) {
   
   # 2) Plot as PDF
   observeEvent(input$btn_dl_pdf, {
-    # JS side will now pick the visible plot (Zip or Coverage)
+    # JS side will pick the visible plot (Bias/Coverage/Zip)
     session$sendCustomMessage(
       "download-pdf",
       list(
