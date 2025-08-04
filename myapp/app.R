@@ -595,7 +595,8 @@ server <- function(input, output, session) {
     } else {
       setdiff(unique(sim_params$method), c("unadjusted", "adjusted"))
     }
-    checkboxGroupInput("method", "Method:", choices = available, selected = available)
+    available_sorted <- available[order(tolower(available))]
+    checkboxGroupInput("method", "Method:", choices = available_sorted, selected = available_sorted)
   })
   
   ## Reactive filters ---------------------------------------------------------
