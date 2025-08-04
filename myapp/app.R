@@ -47,7 +47,7 @@ library(munsell)
 # Import data -----------------------------------------------------------------------------------------------------
 
 data_dir <- file.path(app_base, "data")
-ds_cors   <- read_csv(file.path(data_dir, "cors_small.csv.gz"),   show_col_types = FALSE)
+ds_cors <- read_csv(file.path(data_dir, "cors_small.csv.gz"),   show_col_types = FALSE)
 ds_energy <- read_csv(file.path(data_dir, "energy_small.csv.gz"), show_col_types = FALSE)
 ds_models <- read_csv(file.path(data_dir, "models_small.csv.gz"), show_col_types = FALSE)
 
