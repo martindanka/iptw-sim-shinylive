@@ -1,15 +1,17 @@
 
-# A small helper to plot coverage (with 95% Monte Carlo CIs) by method and exposure.
-
+# Coverage (with 95% Monte Carlo CIs) by method and exposure.
 plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
   if (!nrow(data)) {
     return(ggplot2::ggplot() + ggplot2::labs(title = "No data.") + ggplot2::theme_void())
   }
   
+  # Safely look up pretty_dgm() if it exists in the app
+  .pretty <- get0("pretty_dgm", mode = "function", inherits = TRUE)
+  
   data <- data %>%
     dplyr::mutate(
       covered = ifelse(conf.low <= true_value & conf.high >= true_value, 1, 0),
-      dgm = pretty_dgm(dgm)  # pretty labels from the app
+      dgm = if (is.function(.pretty)) .pretty(dgm) else dgm
     )
   
   cov_summary <- data %>%

@@ -20,6 +20,15 @@ if (!nzchar(Sys.getenv("SHINYLIVE"))) {
 }
 install_missing_pkgs(c("rsimsum", "ggplot2"))
 
+# 3. Base directory for app files
+app_base <- if (nzchar(Sys.getenv("SHINYLIVE"))) {
+  "."
+} else if (dir.exists("myapp")) {
+  "myapp"
+} else {
+  "."
+}
+
 
 # Packages --------------------------------------------------------------------------------------------------------
 
@@ -36,9 +45,10 @@ library(munsell)
 
 # Import data -----------------------------------------------------------------------------------------------------
 
-ds_cors <- read_csv("data/cors_small.csv.gz", show_col_types = FALSE)
-ds_energy <- read_csv("data/energy_small.csv.gz", show_col_types = FALSE)
-ds_models <- read_csv("data/models_small.csv.gz", show_col_types = FALSE)
+data_dir <- file.path(app_base, "data")
+ds_cors <- read_csv(file.path(data_dir, "cors_small.csv.gz"),   show_col_types = FALSE)
+ds_energy <- read_csv(file.path(data_dir, "energy_small.csv.gz"), show_col_types = FALSE)
+ds_models <- read_csv(file.path(data_dir, "models_small.csv.gz"), show_col_types = FALSE)
 
 collect_df <- identity
 
@@ -245,7 +255,8 @@ prettify_headers <- function(df) {
   df
 }
 
-source("plot_R/coverage_plot.R")  ### NEW: source external plotting helper
+plot_dir <- file.path(app_base, "plot_R")
+source(file.path(plot_dir, "coverage_plot.R"))
 
 ui <- fluidPage(
   ## Roboto at run-time (no build-time effect) -------------------------------
