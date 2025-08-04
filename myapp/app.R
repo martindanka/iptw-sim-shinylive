@@ -510,7 +510,7 @@ ui <- fluidPage(
   }
 ")),
   
-  titlePanel("Interactive Simulation Summaries"),
+  titlePanel("Simulation Results for IPW of Count Exposures"),
   
   sidebarLayout(
     sidebarPanel(
