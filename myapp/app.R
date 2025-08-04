@@ -43,7 +43,6 @@ library(scales)
 library(readr)
 library(rsimsum)
 library(munsell)
-library(ggdist)
 
 # Import data -----------------------------------------------------------------------------------------------------
 
