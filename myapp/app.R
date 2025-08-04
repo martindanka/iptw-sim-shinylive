@@ -47,7 +47,7 @@ library(munsell)
 # Import data -----------------------------------------------------------------------------------------------------
 
 data_dir <- file.path(app_base, "data")
-ds_cors <- read_csv(file.path(data_dir, "cors_small.csv.gz"),   show_col_types = FALSE)
+ds_cors   <- read_csv(file.path(data_dir, "cors_small.csv.gz"),   show_col_types = FALSE)
 ds_energy <- read_csv(file.path(data_dir, "energy_small.csv.gz"), show_col_types = FALSE)
 ds_models <- read_csv(file.path(data_dir, "models_small.csv.gz"), show_col_types = FALSE)
 
@@ -62,10 +62,20 @@ pretty_dgm <- function(x) dplyr::recode(
   as.character(x),
   nb_bin   = "NegBin",
   pois_bin = "Poisson",
-  NegBin = "NegBin",
-  Poisson = "Poisson",
+  NegBin   = "NegBin",
+  Poisson  = "Poisson",
   .default = as.character(x)
 )
+
+# Display labels for facet strips (pre-labelled in the data; no ggplot labeller)
+label_dgm_display <- function(x) {
+  x <- as.character(x)
+  out <- x
+  out[x %in% c("nb_bin", "NegBin")]    <- "DGM: Negative Binomial"
+  out[x %in% c("pois_bin", "Poisson")] <- "DGM: Poisson"
+  out[is.na(x)] <- ""  # hide any stray NA rather than printing "NA"
+  out
+}
 
 sim_params <- ds_models %>%
   distinct(ate_exp, mech, phi, dgm, method, weight) %>%
@@ -94,11 +104,11 @@ format_rsimsum_summary <- function(simsum_obj) {
   
   wide %>%
     mutate(
-      `Bias (MCSE)`       = sprintf("%.3f (%.3f)", bias_est,    bias_mcse),
-      `Rel. Bias (MCSE)`  = sprintf("%.1f%% (%.1f%%)", rbias_est * 100, rbias_mcse * 100),
-      `Emp. SE`           = sprintf("%.3f",  empse_est),
-      `Model SE`          = sprintf("%.3f",  modelse_est),
-      `Coverage (MCSE)`   = sprintf("%.3f (%.3f)", cover_est,   cover_mcse)
+      `Bias (MCSE)`      = sprintf("%.3f (%.3f)", bias_est,    bias_mcse),
+      `Rel. Bias (MCSE)` = sprintf("%.1f%% (%.1f%%)", rbias_est * 100, rbias_mcse * 100),
+      `Emp. SE`          = sprintf("%.3f",  empse_est),
+      `Model SE`         = sprintf("%.3f",  modelse_est),
+      `Coverage (MCSE)`  = sprintf("%.3f (%.3f)", cover_est,   cover_mcse)
     ) %>%
     select(
       all_of(grouping_vars),
@@ -142,6 +152,7 @@ plot_zip_with_estimates <- function(data, true_value) {
     scale_color_manual(values = c(Yes = "black", No = "orange")) +
     scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
     labs(
+      title = NULL,
       x = "Estimate", y = "Fractional centile of |Z-score|",
       colour = "CI includes\ntrue value"
     ) +
@@ -263,11 +274,177 @@ prettify_headers <- function(df) {
   df
 }
 
-# Load plotting functions -----------------------------------------------------------------------------------------
-plot_dir <- file.path(app_base, "plot_R")
-source(file.path(plot_dir, "coverage_plot.R"))
-source(file.path(plot_dir, "bias_plot.R"))
+# ----- Coverage plot (NA-proof facet titles, no ggplot labeller) ------------
+plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
+  if (!nrow(data)) {
+    return(ggplot2::ggplot() +
+             ggplot2::labs(title = "No data.") +
+             ggplot2::theme_void())
+  }
+  
+  .pretty <- get0("pretty_dgm", mode = "function", inherits = TRUE)
+  
+  data <- data %>%
+    dplyr::mutate(
+      covered = ifelse(conf.low <= true_value & conf.high >= true_value, 1, 0),
+      dgm     = if (is.function(.pretty)) .pretty(dgm) else dgm,
+      dgm_lab = label_dgm_display(dgm),  # pre-labelled strip text
+      method  = ifelse(method == "multinom", "multinomial", method)
+    )
+  
+  cov_summary <- data %>%
+    dplyr::group_by(method, dgm_lab) %>%
+    dplyr::summarise(
+      n        = dplyr::n(),
+      coverage = mean(covered),
+      se       = sqrt(pmax(coverage * (1 - coverage) / n, 0)),
+      ci_lower = pmax(0, coverage - stats::qnorm(0.975) * se),
+      ci_upper = pmin(1, coverage + stats::qnorm(0.975) * se),
+      .groups  = "drop"
+    )
+  
+  # Order methods by worst absolute deviation from nominal
+  ord <- cov_summary %>%
+    dplyr::group_by(method) %>%
+    dplyr::summarise(worst = max(abs(coverage - nominal), na.rm = TRUE), .groups = "drop") %>%
+    dplyr::arrange(dplyr::desc(worst)) %>%
+    dplyr::pull(method)
+  cov_summary$method <- factor(cov_summary$method, levels = ord)
+  
+  # Data-driven y-limits; pad slightly and clip to [0,1]
+  y_min <- min(cov_summary$ci_lower, nominal, na.rm = TRUE)
+  y_max <- max(cov_summary$ci_upper, nominal, na.rm = TRUE)
+  pad   <- 0.02
+  lims  <- c(max(0, y_min - pad), min(1, y_max + pad))
+  
+  # Major breaks every 0.05; no minor breaks
+  brk_start <- floor(lims[1] * 20) / 20
+  brk_end   <- ceiling(lims[2] * 20) / 20
+  brks      <- seq(brk_start, brk_end, by = 0.05)
+  
+  ggplot2::ggplot(cov_summary, ggplot2::aes(x = method, y = coverage)) +
+    ggplot2::geom_point(size = 2, colour = "black") +
+    ggplot2::geom_errorbar(
+      ggplot2::aes(ymin = ci_lower, ymax = ci_upper),
+      width = 0, colour = "black"
+    ) +
+    ggplot2::geom_hline(yintercept = nominal, linetype = "dashed", linewidth = 0.6) +
+    ggplot2::scale_y_continuous(
+      limits = lims,
+      breaks = brks,
+      minor_breaks = NULL,
+      expand = ggplot2::expansion(mult = c(0, 0))
+    ) +
+    ggplot2::labs(
+      title = NULL,
+      x = "Method for Constructing Weights",
+      y = "Coverage with Monte Carlo 95% CI"
+    ) +
+    ggplot2::facet_wrap(~ dgm_lab) +
+    ggplot2::theme_bw(base_size = 14) +
+    ggplot2::theme(
+      legend.position  = "none",
+      strip.background = ggplot2::element_rect(fill = "white", colour = NA),
+      strip.text       = ggplot2::element_text(face = "bold", size = 15),
+      axis.text        = ggplot2::element_text(size = 12),
+      axis.title       = ggplot2::element_text(size = 13, margin = ggplot2::margin(t = 6, r = 6)),
+      panel.spacing.x  = grid::unit(1.2, "lines")
+    )
+}
 
+# ----- Bias plot (NA-proof facet titles, no ggplot labeller) ----------------
+plot_bias_by_method <- function(data, true_value) {
+  if (!nrow(data)) {
+    return(ggplot2::ggplot() +
+             ggplot2::labs(title = "No data.") +
+             ggplot2::theme_void())
+  }
+  
+  .pretty <- get0("pretty_dgm", mode = "function", inherits = TRUE)
+  if (!is.function(.pretty)) .pretty <- base::identity
+  
+  has_ggdist <- requireNamespace("ggdist", quietly = TRUE)
+  
+  perf <- data %>%
+    dplyr::filter(!is.na(estimate)) %>%
+    dplyr::mutate(
+      diff    = estimate - true_value,
+      method  = ifelse(method == "multinom", "multinomial", method),
+      dgm     = .pretty(dgm),
+      dgm_lab = label_dgm_display(dgm)  # pre-labelled strip text
+    )
+  
+  bias_summary <- perf %>%
+    dplyr::group_by(method, dgm_lab) %>%
+    dplyr::summarise(
+      n        = dplyr::n(),
+      bias     = mean(diff),
+      se_mean  = stats::sd(diff) / sqrt(n),
+      ci_lower = bias - stats::qnorm(0.975) * se_mean,
+      ci_upper = bias + stats::qnorm(0.975) * se_mean,
+      .groups  = "drop"
+    )
+  
+  # Order by |bias| (desc), then reverse so "worst" appears at TOP
+  perf_ord <- perf %>%
+    dplyr::left_join(bias_summary, by = c("method", "dgm_lab")) %>%
+    dplyr::mutate(
+      method = forcats::fct_reorder(method, abs(bias), .desc = TRUE),
+      method = if ("adjusted" %in% levels(method))
+        forcats::fct_relevel(method, "adjusted", after = 6) else method
+    )
+  lev_rev <- rev(levels(perf_ord$method))
+  perf_ord$method  <- factor(perf_ord$method, levels = lev_rev)
+  bias_summary$method <- factor(bias_summary$method, levels = lev_rev)
+  
+  p <- ggplot2::ggplot(perf_ord, ggplot2::aes(x = method, y = diff, fill = method))
+  
+  if (has_ggdist) {
+    p <- p + ggdist::stat_halfeye(
+      adjust = 0.5, width = 0.6, justification = -0.2, .width = 0, point_colour = NA
+    )
+  } else {
+    p <- p + ggplot2::geom_violin(width = 0.6, trim = TRUE, alpha = 0.9, colour = NA)
+  }
+  
+  p +
+    ggplot2::geom_point(
+      data = bias_summary,
+      ggplot2::aes(x = method, y = bias),
+      colour = "black", size = 2, inherit.aes = FALSE
+    ) +
+    ggplot2::geom_segment(
+      data = bias_summary,
+      ggplot2::aes(x = as.numeric(method), xend = as.numeric(method), y = 0, yend = bias),
+      colour = "black", inherit.aes = FALSE
+    ) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.6) +
+    ggplot2::scale_y_continuous(
+      limits = c(-0.5, 0.5),
+      breaks = seq(-0.5, 0.5, 0.1),
+      minor_breaks = NULL
+    ) +
+    ggplot2::labs(
+      title = NULL,
+      x = "Method for Constructing Weights",
+      y = expression("Bias on the Log Risk Ratio Scale and Distribution of" ~
+                       hat(italic(theta)[i]) - italic(theta))
+    ) +
+    ggplot2::facet_wrap(~ dgm_lab) +
+    ggplot2::coord_flip() +
+    ggplot2::theme_bw(base_size = 14) +
+    ggplot2::theme(
+      legend.position  = "none",
+      strip.background = ggplot2::element_rect(fill = "white", colour = NA),
+      strip.text       = ggplot2::element_text(face = "bold", size = 15),
+      axis.text        = ggplot2::element_text(size = 12),
+      axis.title       = ggplot2::element_text(size = 13, margin = ggplot2::margin(t = 6, r = 6)),
+      panel.grid       = ggplot2::element_blank(),
+      panel.spacing.x  = grid::unit(1.2, "lines")
+    )
+}
+
+# --------------------------------- UI --------------------------------------
 
 ui <- fluidPage(
   ## Roboto at run-time (no build-time effect) -------------------------------
@@ -381,6 +558,8 @@ ui <- fluidPage(
   )
 )
 
+
+# -------------------------------- Server -----------------------------------
 
 server <- function(input, output, session) {
   ## Populate selectors -------------------------------------------------------

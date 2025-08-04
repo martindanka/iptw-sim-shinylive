@@ -1,5 +1,4 @@
 # Coverage (with 95% Monte Carlo CIs) by method and exposure.
-
 plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
   if (!nrow(data)) {
     return(ggplot2::ggplot() +
@@ -7,17 +6,29 @@ plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
              ggplot2::theme_void())
   }
   
+  # Optional: pick up pretty_dgm() if defined in app.R
   .pretty <- get0("pretty_dgm", mode = "function", inherits = TRUE)
+  
+  # Local, NA-proof display labels for facet strips
+  label_dgm_display <- function(x) {
+    x <- as.character(x)
+    out <- x
+    out[x %in% c("nb_bin", "NegBin")]     <- "DGM: Negative Binomial"
+    out[x %in% c("pois_bin", "Poisson")]  <- "DGM: Poisson"
+    out[is.na(x)] <- ""
+    out
+  }
   
   data <- data %>%
     dplyr::mutate(
       covered = ifelse(conf.low <= true_value & conf.high >= true_value, 1, 0),
       dgm     = if (is.function(.pretty)) .pretty(dgm) else dgm,
+      dgm_lab = label_dgm_display(dgm),
       method  = ifelse(method == "multinom", "multinomial", method)
     )
   
   cov_summary <- data %>%
-    dplyr::group_by(method, dgm) %>%
+    dplyr::group_by(method, dgm_lab) %>%
     dplyr::summarise(
       n        = dplyr::n(),
       coverage = mean(covered),
@@ -27,7 +38,7 @@ plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
       .groups  = "drop"
     )
   
-  # Order methods from worst to best (largest |coverage - nominal| across DGMs = worst)
+  # Order methods by worst absolute deviation from nominal
   ord <- cov_summary %>%
     dplyr::group_by(method) %>%
     dplyr::summarise(worst = max(abs(coverage - nominal), na.rm = TRUE), .groups = "drop") %>%
@@ -35,26 +46,16 @@ plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
     dplyr::pull(method)
   cov_summary$method <- factor(cov_summary$method, levels = ord)
   
-  # Data-driven y-limits; pad slightly and clip to [0,1]
+  # Data-driven y-limits
   y_min <- min(cov_summary$ci_lower, nominal, na.rm = TRUE)
   y_max <- max(cov_summary$ci_upper, nominal, na.rm = TRUE)
   pad   <- 0.02
   lims  <- c(max(0, y_min - pad), min(1, y_max + pad))
   
-  # Major breaks every 0.05; no minor breaks
+  # 0.05 major breaks
   brk_start <- floor(lims[1] * 20) / 20
   brk_end   <- ceiling(lims[2] * 20) / 20
   brks      <- seq(brk_start, brk_end, by = 0.05)
-  
-  # Facet labeler tolerant to both encodings
-  lab_dgm <- ggplot2::as_labeller(function(v) dplyr::recode(
-    as.character(v),
-    nb_bin   = "DGM: Negative Binomial",
-    pois_bin = "DGM: Poisson",
-    NegBin   = "DGM: Negative Binomial",
-    Poisson  = "DGM: Poisson",
-    .default = as.character(v)
-  ))
   
   ggplot2::ggplot(cov_summary, ggplot2::aes(x = method, y = coverage)) +
     ggplot2::geom_point(size = 2, colour = "black") +
@@ -70,10 +71,11 @@ plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
       expand = ggplot2::expansion(mult = c(0, 0))
     ) +
     ggplot2::labs(
+      title = NULL,
       x = "Method for Constructing Weights",
       y = "Coverage with Monte Carlo 95% CI"
     ) +
-    ggplot2::facet_wrap(~ dgm, labeller = lab_dgm) +
+    ggplot2::facet_wrap(~ dgm_lab) +
     ggplot2::theme_bw(base_size = 14) +
     ggplot2::theme(
       legend.position  = "none",

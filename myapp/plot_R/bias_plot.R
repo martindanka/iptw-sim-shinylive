@@ -1,5 +1,4 @@
 # Half-eye ("rainbow") bias plot with 95% Monte Carlo CIs by method and exposure.
-
 plot_bias_by_method <- function(data, true_value) {
   if (!nrow(data)) {
     return(ggplot2::ggplot() +
@@ -7,22 +6,33 @@ plot_bias_by_method <- function(data, true_value) {
              ggplot2::theme_void())
   }
   
-  # Optional: use pretty_dgm() if present; the idempotent version is safe
+  # Optional: pick up pretty_dgm() if defined in app.R
   .pretty <- get0("pretty_dgm", mode = "function", inherits = TRUE)
   if (!is.function(.pretty)) .pretty <- base::identity
+  
+  # Local, NA-proof display labels for facet strips
+  label_dgm_display <- function(x) {
+    x <- as.character(x)
+    out <- x
+    out[x %in% c("nb_bin", "NegBin")]     <- "DGM: Negative Binomial"
+    out[x %in% c("pois_bin", "Poisson")]  <- "DGM: Poisson"
+    out[is.na(x)] <- ""
+    out
+  }
   
   has_ggdist <- requireNamespace("ggdist", quietly = TRUE)
   
   perf <- data %>%
     dplyr::filter(!is.na(estimate)) %>%
     dplyr::mutate(
-      diff   = estimate - true_value,
-      method = ifelse(method == "multinom", "multinomial", method),
-      dgm    = .pretty(dgm)
+      diff    = estimate - true_value,
+      method  = ifelse(method == "multinom", "multinomial", method),
+      dgm     = .pretty(dgm),
+      dgm_lab = label_dgm_display(dgm)
     )
   
   bias_summary <- perf %>%
-    dplyr::group_by(method, dgm) %>%
+    dplyr::group_by(method, dgm_lab) %>%
     dplyr::summarise(
       n        = dplyr::n(),
       bias     = mean(diff),
@@ -34,26 +44,15 @@ plot_bias_by_method <- function(data, true_value) {
   
   # Order by |bias| (desc), then reverse so "worst" appears at TOP
   perf_ord <- perf %>%
-    dplyr::left_join(bias_summary, by = c("method", "dgm")) %>%
+    dplyr::left_join(bias_summary, by = c("method", "dgm_lab")) %>%
     dplyr::mutate(
       method = forcats::fct_reorder(method, abs(bias), .desc = TRUE),
       method = if ("adjusted" %in% levels(method))
         forcats::fct_relevel(method, "adjusted", after = 6) else method
     )
   lev_rev <- rev(levels(perf_ord$method))
-  perf_ord$method <- factor(perf_ord$method, levels = lev_rev)
-  bias_summary <- bias_summary %>%
-    dplyr::mutate(method = factor(method, levels = lev_rev))
-  
-  # Facet labeler tolerant to raw and pretty codes (prevents NA titles)
-  lab_dgm <- ggplot2::as_labeller(function(v) dplyr::recode(
-    as.character(v),
-    nb_bin   = "DGM: Negative Binomial",
-    pois_bin = "DGM: Poisson",
-    NegBin   = "DGM: Negative Binomial",
-    Poisson  = "DGM: Poisson",
-    .default = as.character(v)
-  ))
+  perf_ord$method     <- factor(perf_ord$method, levels = lev_rev)
+  bias_summary$method <- factor(bias_summary$method, levels = lev_rev)
   
   p <- ggplot2::ggplot(perf_ord, ggplot2::aes(x = method, y = diff, fill = method))
   
@@ -83,11 +82,12 @@ plot_bias_by_method <- function(data, true_value) {
       minor_breaks = NULL
     ) +
     ggplot2::labs(
+      title = NULL,
       x = "Method for Constructing Weights",
       y = expression("Bias on the Log Risk Ratio Scale and Distribution of" ~
                        hat(italic(theta)[i]) - italic(theta))
     ) +
-    ggplot2::facet_wrap(~ dgm, labeller = lab_dgm) +
+    ggplot2::facet_wrap(~ dgm_lab) +
     ggplot2::coord_flip() +
     ggplot2::theme_bw(base_size = 14) +
     ggplot2::theme(
