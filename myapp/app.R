@@ -1,8 +1,8 @@
 # Shinylive fixes -------------------------------------------------------------------------------------------------
 
-# 1. Build‑time safety switches
+# 1. Build-time safety switches
 options(
-  bslib.download_fonts = FALSE, # never bundle Google‑font files
+  bslib.download_fonts = FALSE, # never bundle Google-font files
   bslib.prefer_remote_fonts = TRUE # write plain @import rules if needed
 )
 
@@ -58,7 +58,7 @@ format_rsimsum_summary <- function(simsum_obj) {
   }
   target_stats <- c("bias", "rbias", "empse", "modelse", "cover")
   grouping_vars <- if (is.null(simsum_obj$by)) character(0) else simsum_obj$by
-
+  
   wide <- simsum_obj$summ %>%
     filter(stat %in% target_stats) %>%
     group_by(across(all_of(c("method", grouping_vars, "stat")))) %>%
@@ -68,30 +68,31 @@ format_rsimsum_summary <- function(simsum_obj) {
       names_from = stat, values_from = c(est, mcse),
       names_glue = "{stat}_{.value}"
     )
-
+  
   exp_cols <- as.vector(outer(target_stats, c("est", "mcse"), paste, sep = "_"))
   wide[setdiff(exp_cols, names(wide))] <- NA_real_
-
+  
   if ("dgm" %in% grouping_vars) wide$dgm <- pretty_dgm(wide$dgm)
-
+  
   wide %>%
     mutate(
-      Bias = sprintf("%.3f (%.3f)", bias_est, bias_mcse),
-      `Rel. Bias` = sprintf("%.1f%% (%.1f%%)", rbias_est * 100, rbias_mcse * 100),
+      `Bias (MCSE)` = sprintf("%.3f (%.3f)", bias_est, bias_mcse),
+      `Rel. Bias (MCSE)` = sprintf("%.1f%% (%.1f%%)", rbias_est * 100, rbias_mcse * 100),
       `Emp. SE` = sprintf("%.3f", empse_est),
       `Model SE` = sprintf("%.3f", modelse_est),
-      Coverage = sprintf("%.3f (%.3f)", cover_est, cover_mcse)
+      `Coverage (MCSE)` = sprintf("%.3f (%.3f)", cover_est, cover_mcse)
     ) %>%
     select(all_of(grouping_vars),
-      Method = method,
-      Bias, `Rel. Bias`, `Emp. SE`, `Model SE`, Coverage
-    )
+           Method = method,
+           `Bias (MCSE)`, `Rel. Bias (MCSE)`, `Emp. SE`, `Model SE`, `Coverage (MCSE)`
+    ) |>
+    rename('Exposure' = dgm)
 }
 
 plot_zip_with_estimates <- function(data, true_value) {
   data$model <- data$dgm
   data$dgm <- pretty_dgm(data$dgm)
-
+  
   data <- data %>%
     filter(!is.na(std.error) & std.error > 0) %>%
     mutate(
@@ -103,17 +104,17 @@ plot_zip_with_estimates <- function(data, true_value) {
     group_by(method) %>%
     mutate(centile = percent_rank(abs_z_score)) %>%
     ungroup()
-
+  
   if (nrow(data) == 0) {
     return(ggplot() +
-      labs(title = "No data.") +
-      theme_void())
+             labs(title = "No data.") +
+             theme_void())
   }
-
+  
   perc95 <- data %>%
     group_by(method) %>%
     summarise(p95 = quantile(centile, .95), .groups = "drop")
-
+  
   ggplot(data, aes(x = estimate, y = centile)) +
     geom_errorbarh(aes(
       xmin = conf.low, xmax = conf.high,
@@ -147,7 +148,7 @@ balance_summary_tbl <- function(df_energy, df_cors) {
       eps_A_mean = mean(eps_A), eps_C_mean = mean(eps_C),
       .groups = "drop"
     )
-
+  
   cor_tbl <- df_cors %>%
     mutate(abs_cor = abs(cor)) %>%
     group_by(dgm, method, rep) %>%
@@ -158,16 +159,17 @@ balance_summary_tbl <- function(df_energy, df_cors) {
       P95_rho = quantile(mean_abs_cor, .95), Max_rho = max(mean_abs_cor),
       .groups = "drop"
     )
-
+  
   ess_tbl %>%
     inner_join(cor_tbl, by = c("dgm", "method")) %>%
     select(dgm,
-      Method = method,
-      Mean_ESS, SD_ESS, P5_ESS, P95_ESS,
-      Dw_mean, Dw_sd, eps_A_mean, eps_C_mean,
-      Mean_rho, SD_rho, P95_rho, Max_rho
+           Method = method,
+           Mean_ESS, SD_ESS, P5_ESS, P95_ESS,
+           Dw_mean, Dw_sd, eps_A_mean, eps_C_mean,
+           Mean_rho, SD_rho, P95_rho, Max_rho
     ) %>%
-    arrange(dgm, Method)
+    arrange(dgm, Method) |>
+    rename(Exposure = dgm)
 }
 
 round_numeric_cols <- function(df) {
@@ -208,17 +210,45 @@ prettify_headers <- function(df) {
     Dw_sd = "SD Dw",
     eps_A_mean = "&epsilon;<sub>A</sub>",
     eps_C_mean = "&epsilon;<sub>C</sub>",
-    Mean_rho = "Mean |&rho;<sub>w</sub>|",
-    SD_rho = "SD |&rho;<sub>w</sub>|",
-    P95_rho = "95<sup>th</sup> |&rho;<sub>w</sub>|",
-    Max_rho = "Max |&rho;<sub>w</sub>|"
+    Mean_rho = paste0(
+      "<span style='display:inline-block;",
+      " padding:0 0.4em;",               # space for the caret
+      " border-left:1px solid currentColor;",
+      " border-right:1px solid currentColor;'>",
+      "&rho;<sub>w</sub></span>"
+    ),
+    SD_rho = paste0(
+      "<span style='display:inline-block;",
+      " padding:0 0.4em;",
+      " border-left:1px solid currentColor;",
+      " border-right:1px solid currentColor;'>",
+      "&rho;<sub>w</sub></span>"
+    ),
+    P95_rho = paste0(
+      "95<sup>th</sup> ",
+      "<span style='display:inline-block;",
+      " padding:0 0.4em;",
+      " border-left:1px solid currentColor;",
+      " border-right:1px solid currentColor;'>",
+      "&rho;<sub>w</sub></span>"
+    ),
+    Max_rho = paste0(
+      "Max ",
+      "<span style='display:inline-block;",
+      " padding:0 0.4em;",
+      " border-left:1px solid currentColor;",
+      " border-right:1px solid currentColor;'>",
+      "&rho;<sub>w</sub></span>"
+    )
   )
   names(df) <- ifelse(nm %in% names(map), map[nm], nm)
   df
 }
 
+source("plot_R/coverage_plot.R")  ### NEW: source external plotting helper
+
 ui <- fluidPage(
-  ## Roboto at run‑time (no build‑time effect) -------------------------------
+  ## Roboto at run-time (no build-time effect) -------------------------------
   tags$head(
     tags$link(
       rel  = "stylesheet",
@@ -241,13 +271,28 @@ ui <- fluidPage(
       });
       Shiny.addCustomMessageHandler('download-pdf', function(msg) {
         const { jsPDF } = window.jspdf;
-        // Grab the <img> that Shiny's renderPlot() generated:
-        var container = document.getElementById('zip_plot');
-        if (!container) { alert('Plot container not found'); return; }
-        var img = container.getElementsByTagName('img')[0];
+        // Grab the <img> for the currently visible plot (Zip or Coverage):
+        function findVisiblePlotImage(ids) {
+          for (const id of ids) {
+            var container = document.getElementById(id);
+            if (!container) continue;
+            var img = container.getElementsByTagName('img')[0];
+            if (!img) continue;
+            if (container.offsetParent !== null &&
+                window.getComputedStyle(container).display !== 'none' &&
+                window.getComputedStyle(container).visibility !== 'hidden') {
+              return img;
+            }
+          }
+          return null;
+        }
+        var img = findVisiblePlotImage(['zip_plot','coverage_plot']) ||
+                  (document.getElementById('zip_plot')||{}).getElementsByTagName?.('img')[0] ||
+                  (document.getElementById('coverage_plot')||{}).getElementsByTagName?.('img')[0];
+
         if (!img) { alert('Plot image not found'); return; }
         var doc = new jsPDF();
-        // full‑width image, preserve aspect ratio
+        // full-width image, preserve aspect ratio
         doc.addImage(img.src, 'PNG', 10, 10, 190, 0);
         doc.save(msg.filename);
       });
@@ -257,9 +302,17 @@ ui <- fluidPage(
   theme = app_theme,
   
   tags$style(HTML("
-    div.dataTables_filter{ float:left!important; text-align:left!important; }
-    table.dataTable tbody td{ padding:6px 10px; }
-  ")),
+  div.dataTables_filter{ float:left!important; text-align:left!important; }
+  table.dataTable tbody td{ padding:6px 10px; }
+
+  /* NEW ─ header cells: centred text & extra space */
+  table.dataTable thead th{
+    text-align:center;         /* centre content */
+    vertical-align:bottom;     /* keep maths symbols on the baseline */
+    padding:6px 16px 4px 16px; /* ↑ top | → right | ↓ bottom | ← left */
+    white-space:nowrap;        /* stop long labels wrapping */
+  }
+")),
   
   titlePanel("Interactive Simulation Summaries"),
   
@@ -297,7 +350,8 @@ ui <- fluidPage(
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Summary Table", DTOutput("summary_tbl")),
-        tabPanel("Zip Plot",      plotOutput("zip_plot", height = "800px"))
+        tabPanel("Zip Plot",      plotOutput("zip_plot", height = "800px")),
+        tabPanel("Coverage Plot", plotOutput("coverage_plot", height = "800px"))  ### NEW
       )
     )
   )
@@ -379,7 +433,7 @@ server <- function(input, output, session) {
     tbl
   })
   
-output$summary_tbl <- renderDT({
+  output$summary_tbl <- renderDT({
     tbl <- current_table_disp()
     if (is.null(tbl)) {
       datatable(
@@ -388,7 +442,7 @@ output$summary_tbl <- renderDT({
         rownames = FALSE
       )
     } else {
-
+      
       ## ---------- FOOTNOTE TEXT & CAPTION (new) --------------------------- ##
       footnote <- if (input$view_type == "models") {
         paste(
@@ -420,13 +474,19 @@ output$summary_tbl <- renderDT({
         )
       }                                             ### ADDED ###
       ## -------------------------------------------------------------------- ##
-
+      
       datatable(
         tbl,
         class     = "stripe hover compact order-column row-border",
         rownames  = FALSE,
         filter    = "top",
-        options   = list(pageLength = 20, autoWidth = TRUE, scrollX = TRUE),
+        extensions = c("FixedColumns"),
+        options    = list(
+          scrollX       = TRUE,                  # turn on horizontal scrolling
+          pageLength    = 20,
+          autoWidth     = TRUE,
+          fixedColumns  = list(leftColumns = 1)  # ← pin the first column
+        ),
         selection = "none",
         escape    = FALSE,
         caption   = tags$caption(                   ### ADDED ###
@@ -450,15 +510,30 @@ output$summary_tbl <- renderDT({
     print(g)
   })
   
+  ## Coverage plot ------------------------------------------------------------
+  current_coverage_plot <- reactive({
+    req(input$view_type == "models")
+    df <- collect_df(base_filter(ds_models))
+    if (!nrow(df)) return(NULL)
+    plot_coverage_by_method(df, true_value = log(as.numeric(input$ate_exp)))
+  })
+  
+  output$coverage_plot <- renderPlot({
+    g <- current_coverage_plot(); req(!is.null(g))
+    print(g)
+  })
+  
   observe({
     if (input$view_type != "models") {
       hideTab("main_tabs", "Zip Plot")
+      hideTab("main_tabs", "Coverage Plot")    ### NEW
     } else {
       showTab("main_tabs", "Zip Plot")
+      showTab("main_tabs", "Coverage Plot")    ### NEW
     }
   })
   
-  ## CLIENT‑SIDE DOWNLOADS ----------------------------------------------------
+  ## CLIENT-SIDE DOWNLOADS ----------------------------------------------------
   # 1) Table as CSV
   observeEvent(input$btn_dl_csv, {
     tbl <- current_table_disp()
@@ -479,11 +554,11 @@ output$summary_tbl <- renderDT({
   
   # 2) Plot as PDF
   observeEvent(input$btn_dl_pdf, {
-    # JS side will look up the <img> with id="zip_plot"
+    # JS side will now pick the visible plot (Zip or Coverage)
     session$sendCustomMessage(
       "download-pdf",
       list(
-        filename = paste0("zip-plot-", Sys.Date(), ".pdf")
+        filename = paste0("plot-", Sys.Date(), ".pdf")
       )
     )
   })
