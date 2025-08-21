@@ -106,7 +106,7 @@ format_rsimsum_summary <- function(simsum_obj) {
   to_rel_bias <- function(est, se) {
     bad <- !is.finite(est) | !is.finite(se) | is.na(est) | is.na(se)
     out <- sprintf("%.1f%% (%.1f%%)", est * 100, se * 100)
-    out[bad] <- "\u2013"  # en dash + dagger
+    out[bad] <- "\u2013"  # en dash only
     out
   }
   
@@ -677,7 +677,6 @@ server <- function(input, output, session) {
     if (input$view_type == "models" && isTRUE(as.numeric(input$ate_exp) == 1.0)) {
       names(tbl)[names(tbl) == "Rel. Bias (MCSE)"] <- "Rel. Bias (MCSE)<sup>\u2020</sup>"
     }
-    
     if (input$view_type == "balance") tbl <- prettify_headers(tbl)
     tbl
   })
@@ -732,18 +731,41 @@ server <- function(input, output, session) {
       }
       ## -------------------------------------------------------------------- ##
       
+      # Build DataTables options with centred cells except Exposure & Method;
+      # and left-align the headers of those two columns ONLY on the models view.
+      ncols <- ncol(tbl)
+      all_idx0 <- 0:(ncols - 1)                     # 0-based for DataTables
+      left_keep <- which(colnames(tbl) %in% c("Exposure", "Method"))
+      centre_targets <- setdiff(all_idx0, left_keep - 1)
+      opts <- list(
+        scrollX = TRUE,
+        pageLength = 20,
+        autoWidth = TRUE,
+        fixedColumns = list(leftColumns = if (input$view_type == "balance") 2 else 1)
+      )
+      if (length(centre_targets)) {
+        opts$columnDefs <- list(list(className = "dt-center", targets = centre_targets))
+      }
+      if (input$view_type == "models") {
+        # Left-align the header text for Exposure and Method
+        opts$headerCallback <- DT::JS("
+          function(thead, data, start, end, display) {
+            var $ths = $(thead).find('th');
+            if ($ths.length >= 2) {
+              $ths.eq(0).css('text-align', 'left');
+              $ths.eq(1).css('text-align', 'left');
+            }
+          }
+        ")
+      }
+      
       datatable(
         tbl,
         class = "stripe hover compact order-column row-border",
         rownames = FALSE,
         filter = "top",
         extensions = c("FixedColumns"),
-        options = list(
-          scrollX = TRUE,
-          pageLength = 20,
-          autoWidth = TRUE,
-          fixedColumns = list(leftColumns = if (input$view_type == "balance") 2 else 1)
-        ),
+        options = opts,
         selection = "none",
         escape = FALSE,
         caption = tags$caption(
@@ -811,25 +833,28 @@ server <- function(input, output, session) {
     tbl <- current_table_disp()
     validate(need(!is.null(tbl), "No data to download"))
     
-    # Clean header names for CSV when balance table (strip HTML + entities)
+    # Clean header names for CSV for all views (strip HTML + entities)
     clean_headers <- function(x) {
-      x <- gsub("<[^>]+>", "", x)                     # strip tags
+      x <- gsub("<[^>]+>", "", x)             # strip tags (incl. <sup>†</sup>)
       x <- gsub("&epsilon;", "epsilon", x, fixed = TRUE)
       x <- gsub("&rho;", "rho", x, fixed = TRUE)
-      x <- gsub("\u00A0", " ", x, fixed = TRUE)       # non-breaking space
+      x <- gsub("\u00A0", " ", x, fixed = TRUE)  # non-breaking space
       x <- gsub("epsilon([AC])", "epsilon_\\L\\1", x, perl = TRUE)
       x <- gsub("rho([w])", "rho_\\1", x, perl = TRUE)
       x <- gsub("([0-9])<sup>th</sup>", "\\1th", x)  # just in case any linger
       x
     }
-    coln <- colnames(tbl)
-    if (input$view_type == "balance") {
-      coln <- clean_headers(coln)
-    }
+    coln <- clean_headers(colnames(tbl))
+    
+    # Ensure no HTML entity for en dash in data (defensive; we use Unicode)
+    tbl_csv <- tbl
+    tbl_csv[] <- lapply(tbl_csv, function(col) {
+      if (is.character(col)) gsub("&ndash;", "\u2013", col, fixed = TRUE) else col
+    })
     
     csv_lines <- c(
       paste(coln, collapse = ","),
-      apply(tbl, 1, function(r) paste(r, collapse = ","))
+      apply(tbl_csv, 1, function(r) paste(r, collapse = ","))
     )
     csv_text <- paste(csv_lines, collapse = "\r\n")
     session$sendCustomMessage(
