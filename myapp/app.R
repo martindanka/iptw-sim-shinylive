@@ -47,7 +47,7 @@ library(munsell)
 # Import data -----------------------------------------------------------------------------------------------------
 
 data_dir <- file.path(app_base, "data")
-ds_cors <- read_csv(file.path(data_dir, "cors_small.csv.gz"),   show_col_types = FALSE)
+ds_cors <- read_csv(file.path(data_dir, "cors_small.csv.gz"), show_col_types = FALSE)
 ds_energy <- read_csv(file.path(data_dir, "energy_small.csv.gz"), show_col_types = FALSE)
 ds_models <- read_csv(file.path(data_dir, "models_small.csv.gz"), show_col_types = FALSE)
 
@@ -60,10 +60,10 @@ app_theme <- bs_theme(version = 5, preset = "bootstrap")
 # Idempotent mapping: accepts raw ("nb_bin","pois_bin") *or* already-pretty ("NegBin","Poisson")
 pretty_dgm <- function(x) dplyr::recode(
   as.character(x),
-  nb_bin   = "NegBin",
+  nb_bin = "NegBin",
   pois_bin = "Poisson",
-  NegBin   = "NegBin",
-  Poisson  = "Poisson",
+  NegBin = "NegBin",
+  Poisson = "Poisson",
   .default = as.character(x)
 )
 
@@ -84,7 +84,7 @@ sim_params <- ds_models %>%
 format_rsimsum_summary <- function(simsum_obj) {
   if (is.null(simsum_obj)) return(NULL)
   
-  target_stats  <- c("bias", "rbias", "empse", "modelse", "cover")
+  target_stats <- c("bias", "rbias", "empse", "modelse", "cover")
   grouping_vars <- if (is.null(simsum_obj$by)) character(0) else simsum_obj$by
   
   wide <- simsum_obj$summ %>%
@@ -102,13 +102,21 @@ format_rsimsum_summary <- function(simsum_obj) {
   
   if ("dgm" %in% grouping_vars) wide$dgm <- pretty_dgm(wide$dgm)
   
+  # Build display strings; guard relative bias when undefined (e.g., true value = 0 => NaN/NA)
+  to_rel_bias <- function(est, se) {
+    bad <- !is.finite(est) | !is.finite(se) | is.na(est) | is.na(se)
+    out <- sprintf("%.1f%% (%.1f%%)", est * 100, se * 100)
+    out[bad] <- "\u2013"  # en dash + dagger
+    out
+  }
+  
   wide %>%
     mutate(
-      `Bias (MCSE)`      = sprintf("%.3f (%.3f)", bias_est,    bias_mcse),
-      `Rel. Bias (MCSE)` = sprintf("%.1f%% (%.1f%%)", rbias_est * 100, rbias_mcse * 100),
-      `Emp. SE`          = sprintf("%.3f",  empse_est),
-      `Model SE`         = sprintf("%.3f",  modelse_est),
-      `Coverage (MCSE)`  = sprintf("%.3f (%.3f)", cover_est,   cover_mcse)
+      `Bias (MCSE)` = sprintf("%.3f (%.3f)", bias_est, bias_mcse),
+      `Rel. Bias (MCSE)` = to_rel_bias(rbias_est, rbias_mcse),
+      `Emp. SE` = sprintf("%.3f", empse_est),
+      `Model SE` = sprintf("%.3f", modelse_est),
+      `Coverage (MCSE)` = sprintf("%.3f (%.3f)", cover_est, cover_mcse)
     ) %>%
     select(
       all_of(grouping_vars),
@@ -120,7 +128,7 @@ format_rsimsum_summary <- function(simsum_obj) {
 
 plot_zip_with_estimates <- function(data, true_value) {
   data$model <- data$dgm
-  data$dgm   <- pretty_dgm(data$dgm)
+  data$dgm <- pretty_dgm(data$dgm)
   
   data <- data %>%
     filter(!is.na(std.error) & std.error > 0) %>%
@@ -206,9 +214,9 @@ round_numeric_cols <- function(df) {
   for (cl in num_cols) {
     x <- df[[cl]]
     ch <- as.character(x)
-    tiny  <- abs(x) < 1e-4 & x != 0
+    tiny <- abs(x) < 1e-4 & x != 0
     small <- abs(x) < 1e-3 & abs(x) >= 1e-4
-    ch[tiny]  <- "<0.0001"
+    ch[tiny] <- "<0.0001"
     ch[small] <- "<0.001"
     keep <- !(tiny | small)
     if (any(keep)) {
@@ -229,14 +237,14 @@ round_numeric_cols <- function(df) {
 }
 
 prettify_headers <- function(df) {
-  nm  <- names(df)
+  nm <- names(df)
   map <- c(
     Mean_ESS = "Mean ESS",
-    SD_ESS   = "SD ESS",
-    P5_ESS   = "5<sup>th</sup> perc ESS",
-    P95_ESS  = "95<sup>th</sup> perc ESS",
-    Dw_mean  = "Dw",
-    Dw_sd    = "SD Dw",
+    SD_ESS = "SD ESS",
+    P5_ESS = "5<sup>th</sup> perc ESS",
+    P95_ESS = "95<sup>th</sup> perc ESS",
+    Dw_mean = "Dw",
+    Dw_sd = "SD Dw",
     eps_A_mean = "&epsilon;<sub>A</sub>",
     eps_C_mean = "&epsilon;<sub>C</sub>",
     Mean_rho = paste0(
@@ -287,20 +295,20 @@ plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
   data <- data %>%
     dplyr::mutate(
       covered = ifelse(conf.low <= true_value & conf.high >= true_value, 1, 0),
-      dgm     = if (is.function(.pretty)) .pretty(dgm) else dgm,
+      dgm = if (is.function(.pretty)) .pretty(dgm) else dgm,
       dgm_lab = label_dgm_display(dgm),  # pre-labelled strip text
-      method  = ifelse(method == "multinom", "multinomial", method)
+      method = ifelse(method == "multinom", "multinomial", method)
     )
   
   cov_summary <- data %>%
     dplyr::group_by(method, dgm_lab) %>%
     dplyr::summarise(
-      n        = dplyr::n(),
+      n = dplyr::n(),
       coverage = mean(covered),
-      se       = sqrt(pmax(coverage * (1 - coverage) / n, 0)),
+      se = sqrt(pmax(coverage * (1 - coverage) / n, 0)),
       ci_lower = pmax(0, coverage - stats::qnorm(0.975) * se),
       ci_upper = pmin(1, coverage + stats::qnorm(0.975) * se),
-      .groups  = "drop"
+      .groups = "drop"
     )
   
   # Order methods by worst absolute deviation from nominal
@@ -314,13 +322,13 @@ plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
   # Data-driven y-limits; pad slightly and clip to [0,1]
   y_min <- min(cov_summary$ci_lower, nominal, na.rm = TRUE)
   y_max <- max(cov_summary$ci_upper, nominal, na.rm = TRUE)
-  pad   <- 0.02
-  lims  <- c(max(0, y_min - pad), min(1, y_max + pad))
+  pad <- 0.02
+  lims <- c(max(0, y_min - pad), min(1, y_max + pad))
   
   # Major breaks every 0.05; no minor breaks
   brk_start <- floor(lims[1] * 20) / 20
-  brk_end   <- ceiling(lims[2] * 20) / 20
-  brks      <- seq(brk_start, brk_end, by = 0.05)
+  brk_end <- ceiling(lims[2] * 20) / 20
+  brks <- seq(brk_start, brk_end, by = 0.05)
   
   ggplot2::ggplot(cov_summary, ggplot2::aes(x = method, y = coverage)) +
     ggplot2::geom_point(size = 2, colour = "black") +
@@ -343,12 +351,12 @@ plot_coverage_by_method <- function(data, true_value, nominal = 0.95) {
     ggplot2::facet_wrap(~ dgm_lab) +
     ggplot2::theme_bw(base_size = 14) +
     ggplot2::theme(
-      legend.position  = "none",
+      legend.position = "none",
       strip.background = ggplot2::element_rect(fill = "white", colour = NA),
-      strip.text       = ggplot2::element_text(face = "bold", size = 15),
-      axis.text        = ggplot2::element_text(size = 12),
-      axis.title       = ggplot2::element_text(size = 13, margin = ggplot2::margin(t = 6, r = 6)),
-      panel.spacing.x  = grid::unit(1.2, "lines")
+      strip.text = ggplot2::element_text(face = "bold", size = 15),
+      axis.text = ggplot2::element_text(size = 12),
+      axis.title = ggplot2::element_text(size = 13, margin = ggplot2::margin(t = 6, r = 6)),
+      panel.spacing.x = grid::unit(1.2, "lines")
     )
 }
 
@@ -368,21 +376,21 @@ plot_bias_by_method <- function(data, true_value) {
   perf <- data %>%
     dplyr::filter(!is.na(estimate)) %>%
     dplyr::mutate(
-      diff    = estimate - true_value,
-      method  = ifelse(method == "multinom", "multinomial", method),
-      dgm     = .pretty(dgm),
+      diff = estimate - true_value,
+      method = ifelse(method == "multinom", "multinomial", method),
+      dgm = .pretty(dgm),
       dgm_lab = label_dgm_display(dgm)  # pre-labelled strip text
     )
   
   bias_summary <- perf %>%
     dplyr::group_by(method, dgm_lab) %>%
     dplyr::summarise(
-      n        = dplyr::n(),
-      bias     = mean(diff),
-      se_mean  = stats::sd(diff) / sqrt(n),
+      n = dplyr::n(),
+      bias = mean(diff),
+      se_mean = stats::sd(diff) / sqrt(n),
       ci_lower = bias - stats::qnorm(0.975) * se_mean,
       ci_upper = bias + stats::qnorm(0.975) * se_mean,
-      .groups  = "drop"
+      .groups = "drop"
     )
   
   # Order by |bias| (desc), then reverse so "worst" appears at TOP
@@ -394,7 +402,7 @@ plot_bias_by_method <- function(data, true_value) {
         forcats::fct_relevel(method, "adjusted", after = 6) else method
     )
   lev_rev <- rev(levels(perf_ord$method))
-  perf_ord$method  <- factor(perf_ord$method, levels = lev_rev)
+  perf_ord$method <- factor(perf_ord$method, levels = lev_rev)
   bias_summary$method <- factor(bias_summary$method, levels = lev_rev)
   
   p <- ggplot2::ggplot(perf_ord, ggplot2::aes(x = method, y = diff, fill = method))
@@ -434,13 +442,13 @@ plot_bias_by_method <- function(data, true_value) {
     ggplot2::coord_flip() +
     ggplot2::theme_bw(base_size = 14) +
     ggplot2::theme(
-      legend.position  = "none",
+      legend.position = "none",
       strip.background = ggplot2::element_rect(fill = "white", colour = NA),
-      strip.text       = ggplot2::element_text(face = "bold", size = 15),
-      axis.text        = ggplot2::element_text(size = 12),
-      axis.title       = ggplot2::element_text(size = 13, margin = ggplot2::margin(t = 6, r = 6)),
-      panel.grid       = ggplot2::element_blank(),
-      panel.spacing.x  = grid::unit(1.2, "lines")
+      strip.text = ggplot2::element_text(face = "bold", size = 15),
+      axis.text = ggplot2::element_text(size = 12),
+      axis.title = ggplot2::element_text(size = 13, margin = ggplot2::margin(t = 6, r = 6)),
+      panel.grid = ggplot2::element_blank(),
+      panel.spacing.x = grid::unit(1.2, "lines")
     )
 }
 
@@ -450,7 +458,7 @@ ui <- fluidPage(
   ## Roboto at run-time (no build-time effect) -------------------------------
   tags$head(
     tags$link(
-      rel  = "stylesheet",
+      rel = "stylesheet",
       href = "https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap"
     ),
     tags$style(HTML(":root{--bs-body-font-family:'Roboto',system-ui,sans-serif;}")),
@@ -518,7 +526,7 @@ ui <- fluidPage(
       
       h4("Simulation Parameters"),
       selectInput("ate_exp", "Effect Size (ATE):", choices = NULL),
-      selectInput("mech", "Missingness Mechanism:", choices = NULL),
+      uiOutput("mech_ui"),
       uiOutput("phi_ui"),
       selectInput(
         "weight_type", "Winsorise at 99th perc:",
@@ -550,9 +558,9 @@ ui <- fluidPage(
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Summary Table", DTOutput("summary_tbl")),
-        tabPanel("Bias Plot",     plotOutput("bias_plot", height = "800px")),
+        tabPanel("Bias Plot", plotOutput("bias_plot", height = "800px")),
         tabPanel("Coverage Plot", plotOutput("coverage_plot", height = "800px")),
-        tabPanel("Zip Plot",      plotOutput("zip_plot", height = "800px"))
+        tabPanel("Zip Plot", plotOutput("zip_plot", height = "800px"))
       )
     )
   )
@@ -565,18 +573,30 @@ server <- function(input, output, session) {
   ## Populate selectors -------------------------------------------------------
   updateSelectInput(
     session, "ate_exp",
-    choices  = setNames(sort(unique(sim_params$ate_exp)),
-                        paste0("ln ", sort(unique(sim_params$ate_exp)))),
+    choices = setNames(sort(unique(sim_params$ate_exp)),
+                       paste0("ln ", sort(unique(sim_params$ate_exp)))),
     selected = 1.1
   )
-  updateSelectInput(session, "mech", choices = unique(sim_params$mech))
+  # Missingness mechanism appears conditionally via output$mech_ui (see below)
   updateCheckboxGroupInput(
     session, "dgm",
-    choices  = setNames(unique(sim_params$dgm), pretty_dgm(unique(sim_params$dgm))),
+    choices = setNames(unique(sim_params$dgm), pretty_dgm(unique(sim_params$dgm))),
     selected = "nb_bin"
   )
   
+  # Conditional UI for missingness mechanism (only when ATE == 1.1)
+  output$mech_ui <- renderUI({
+    req(input$ate_exp)
+    if (isTRUE(as.numeric(input$ate_exp) == 1.1)) {
+      selectInput("mech", "Missingness Mechanism:", choices = unique(sim_params$mech))
+    } else {
+      NULL
+    }
+  })
+  
   output$phi_ui <- renderUI({
+    req(input$ate_exp)
+    if (!isTRUE(as.numeric(input$ate_exp) == 1.1)) return(NULL)
     req(input$mech)
     if (input$mech == "complete") {
       selectInput("phi", "Proportion of Missingness:", choices = 0, selected = 0)
@@ -599,19 +619,36 @@ server <- function(input, output, session) {
     checkboxGroupInput("method", "Method:", choices = available_sorted, selected = available_sorted)
   })
   
+  ## Reactive helpers for mech/phi so filters behave when controls are hidden --
+  mech_value <- reactive({
+    if (isTRUE(as.numeric(input$ate_exp) == 1.1)) {
+      req(input$mech)
+    } else {
+      "complete"
+    }
+  })
+  phi_value <- reactive({
+    if (!isTRUE(as.numeric(input$ate_exp) == 1.1)) {
+      0
+    } else {
+      req(input$mech)
+      if (input$mech == "complete") 0 else req(input$phi)
+    }
+  })
+  
   ## Reactive filters ---------------------------------------------------------
   base_filter <- function(ds) {
     ds %>% filter(
       ate_exp == input$ate_exp,
-      mech    == input$mech,
-      phi     == req(input$phi),
-      weight  == input$weight_type,
-      dgm     %in% input$dgm,
-      method  %in% input$method
+      mech == mech_value(),
+      phi == phi_value(),
+      weight == input$weight_type,
+      dgm %in% input$dgm,
+      method %in% input$method
     )
   }
   filt_energy <- reactive(collect_df(base_filter(ds_energy)) %>% mutate(dgm = pretty_dgm(dgm)))
-  filt_cors   <- reactive(collect_df(base_filter(ds_cors))   %>% mutate(dgm = pretty_dgm(dgm)))
+  filt_cors <- reactive(collect_df(base_filter(ds_cors)) %>% mutate(dgm = pretty_dgm(dgm)))
   filt_models <- reactive(collect_df(base_filter(ds_models)) %>% mutate(dgm = pretty_dgm(dgm)))
   
   ## Summary table ------------------------------------------------------------
@@ -636,6 +673,11 @@ server <- function(input, output, session) {
     tbl <- current_table_raw()
     if (is.null(tbl)) return(NULL)
     tbl <- round_numeric_cols(tbl)
+    # Add dagger to the header when true value = 0 (ATE = 1.0)
+    if (input$view_type == "models" && isTRUE(as.numeric(input$ate_exp) == 1.0)) {
+      names(tbl)[names(tbl) == "Rel. Bias (MCSE)"] <- "Rel. Bias (MCSE)<sup>\u2020</sup>"
+    }
+    
     if (input$view_type == "balance") tbl <- prettify_headers(tbl)
     tbl
   })
@@ -645,14 +687,14 @@ server <- function(input, output, session) {
     if (is.null(tbl)) {
       datatable(
         data.frame(Message = "No data for this combination."),
-        class    = "compact",
+        class = "compact",
         rownames = FALSE
       )
     } else {
       
-      ## ---------- FOOTNOTE TEXT & CAPTION (new) --------------------------- ##
+      ## ---------- FOOTNOTE TEXT & CAPTION (updated) ----------------------- ##
       footnote <- if (input$view_type == "models") {
-        paste(
+        base_ft <- paste(
           "Point estimates and confidence intervals were derived from weighted",
           "Poisson regression models with a sandwich estimator for variance.",
           "Unweighted outcome regressions (adjusted and unadjusted) are shown",
@@ -663,6 +705,14 @@ server <- function(input, output, session) {
           "Model SE – Model-Based Standard Error; Rel. Bias – Relative Bias.",
           collapse = " "
         )
+        if (isTRUE(as.numeric(input$ate_exp) == 1.0)) {
+          paste0(
+            base_ft,
+            "<br /><span style='font-style:italic'>\u2020 Relative bias is undefined when the true value is zero (RR = 1.0), so cells show a dash.</span>"
+          )
+        } else {
+          base_ft
+        }
       } else {
         paste(
           "The ε<sub>C</sub> metric and the absolute treatment–covariate",
@@ -684,19 +734,19 @@ server <- function(input, output, session) {
       
       datatable(
         tbl,
-        class      = "stripe hover compact order-column row-border",
-        rownames   = FALSE,
-        filter     = "top",
+        class = "stripe hover compact order-column row-border",
+        rownames = FALSE,
+        filter = "top",
         extensions = c("FixedColumns"),
-        options    = list(
-          scrollX      = TRUE,
-          pageLength   = 20,
-          autoWidth    = TRUE,
-          fixedColumns = list(leftColumns = 1)
+        options = list(
+          scrollX = TRUE,
+          pageLength = 20,
+          autoWidth = TRUE,
+          fixedColumns = list(leftColumns = if (input$view_type == "balance") 2 else 1)
         ),
         selection = "none",
-        escape    = FALSE,
-        caption   = tags$caption(
+        escape = FALSE,
+        caption = tags$caption(
           style = "caption-side: bottom; text-align: left; font-size: 0.85em;",
           HTML(footnote)
         )
@@ -760,15 +810,32 @@ server <- function(input, output, session) {
   observeEvent(input$btn_dl_csv, {
     tbl <- current_table_disp()
     validate(need(!is.null(tbl), "No data to download"))
+    
+    # Clean header names for CSV when balance table (strip HTML + entities)
+    clean_headers <- function(x) {
+      x <- gsub("<[^>]+>", "", x)                     # strip tags
+      x <- gsub("&epsilon;", "epsilon", x, fixed = TRUE)
+      x <- gsub("&rho;", "rho", x, fixed = TRUE)
+      x <- gsub("\u00A0", " ", x, fixed = TRUE)       # non-breaking space
+      x <- gsub("epsilon([AC])", "epsilon_\\L\\1", x, perl = TRUE)
+      x <- gsub("rho([w])", "rho_\\1", x, perl = TRUE)
+      x <- gsub("([0-9])<sup>th</sup>", "\\1th", x)  # just in case any linger
+      x
+    }
+    coln <- colnames(tbl)
+    if (input$view_type == "balance") {
+      coln <- clean_headers(coln)
+    }
+    
     csv_lines <- c(
-      paste(colnames(tbl), collapse = ","),
+      paste(coln, collapse = ","),
       apply(tbl, 1, function(r) paste(r, collapse = ","))
     )
     csv_text <- paste(csv_lines, collapse = "\r\n")
     session$sendCustomMessage(
       "download-csv",
       list(
-        data     = csv_text,
+        data = csv_text,
         filename = paste0("summary-", Sys.Date(), ".csv")
       )
     )
